@@ -359,6 +359,8 @@ void channelMove(uint16_t Channel)
 #endif
 
     RADIO_ConfigureChannel(gEeprom.TX_VFO, gVfoConfigureMode);
+
+    SETTINGS_SaveVfoIndices();
     
     return;
 }
@@ -393,11 +395,6 @@ void channelMoveSwitch(void) {
         if (gInputBoxIndex == 3) {
             gInputBoxIndex = 0;
             gKeyInputCountdown = 1;
-
-            channelMove(Channel - 1);
-            SETTINGS_SaveVfoIndices();
-            
-            return;
         }
 
         channelMove(Channel - 1);
@@ -600,63 +597,69 @@ static void MAIN_Key_DIGITS(KEY_Code_t Key, bool bKeyPressed, bool bKeyHeld)
 static void MAIN_Key_EXIT(bool bKeyPressed, bool bKeyHeld)
 {
     if (!bKeyHeld && bKeyPressed) { // exit key pressed
-        gBeepToPlay = BEEP_1KHZ_60MS_OPTIONAL;
+        gBeepToPlay = BEEP_1KHZ_60MS_OPTIONAL;  // beep when key is pressed
+        return;                                 // don't use the key till it's released
+    }
 
-#ifdef ENABLE_DTMF_CALLING
-        if (gDTMF_CallState != DTMF_CALL_STATE_NONE && gCurrentFunction != FUNCTION_TRANSMIT)
-        {   // clear CALL mode being displayed
-            gDTMF_CallState = DTMF_CALL_STATE_NONE;
-            gUpdateDisplay  = true;
-            return;
-        }
-#endif
-
-#ifdef ENABLE_FMRADIO
-        if (!gFmRadioMode)
-#endif
-        {
-            if (gScanStateDir == SCAN_OFF) {
-                if (gInputBoxIndex == 0)
-                    return;
-                gInputBox[--gInputBoxIndex] = 10;
-
-                gKeyInputCountdown = key_input_timeout_500ms;
-
-#ifdef ENABLE_VOICE
-                if (gInputBoxIndex == 0)
-                    gAnotherVoiceID = VOICE_ID_CANCEL;
-#endif
+    if (bKeyHeld) { // exit key held down
+        if (bKeyPressed) {
+            if (gInputBoxIndex > 0 || gDTMF_InputBox_Index > 0 || gDTMF_InputMode)
+            {   // cancel key input mode (channel/frequency entry)
+                gDTMF_InputMode       = false;
+                gDTMF_InputBox_Index  = 0;
+                memset(gDTMF_String, 0, sizeof(gDTMF_String));
+                gInputBoxIndex        = 0;
+                gRequestDisplayScreen = DISPLAY_MAIN;
+                gBeepToPlay           = BEEP_1KHZ_60MS_OPTIONAL;
             }
-            else {
-                gScanKeepResult = false;
-                CHFRSCANNER_Stop();
-
-#ifdef ENABLE_VOICE
-                gAnotherVoiceID = VOICE_ID_SCANNING_STOP;
-#endif
-            }
-
-            gRequestDisplayScreen = DISPLAY_MAIN;
-            return;
         }
 
-#ifdef ENABLE_FMRADIO
-        ACTION_FM();
-#endif
         return;
     }
 
-    if (bKeyHeld && bKeyPressed) { // exit key held down
-        if (gInputBoxIndex > 0 || gDTMF_InputBox_Index > 0 || gDTMF_InputMode)
-        {   // cancel key input mode (channel/frequency entry)
-            gDTMF_InputMode       = false;
-            gDTMF_InputBox_Index  = 0;
-            memset(gDTMF_String, 0, sizeof(gDTMF_String));
-            gInputBoxIndex        = 0;
-            gRequestDisplayScreen = DISPLAY_MAIN;
-            gBeepToPlay           = BEEP_1KHZ_60MS_OPTIONAL;
-        }
+#ifdef ENABLE_DTMF_CALLING
+    if (gDTMF_CallState != DTMF_CALL_STATE_NONE && gCurrentFunction != FUNCTION_TRANSMIT)
+    {   // clear CALL mode being displayed
+        gDTMF_CallState = DTMF_CALL_STATE_NONE;
+        gUpdateDisplay  = true;
+        return;
     }
+#endif
+
+#ifdef ENABLE_FMRADIO
+    if (!gFmRadioMode)
+#endif
+    {
+        if (gScanStateDir == SCAN_OFF) {
+            if (gInputBoxIndex == 0)
+                return;
+
+            gInputBox[--gInputBoxIndex] = 10;
+            gKeyInputCountdown = key_input_timeout_500ms;
+
+            channelMoveSwitch();
+
+#ifdef ENABLE_VOICE
+            if (gInputBoxIndex == 0)
+                gAnotherVoiceID = VOICE_ID_CANCEL;
+#endif
+        }
+        else {
+            gScanKeepResult = false;
+            CHFRSCANNER_Stop();
+
+#ifdef ENABLE_VOICE
+            gAnotherVoiceID = VOICE_ID_SCANNING_STOP;
+#endif
+        }
+
+        gRequestDisplayScreen = DISPLAY_MAIN;
+        return;
+    }
+
+#ifdef ENABLE_FMRADIO
+    ACTION_FM();
+#endif
 }
 
 static void MAIN_Key_MENU(bool bKeyPressed, bool bKeyHeld)
