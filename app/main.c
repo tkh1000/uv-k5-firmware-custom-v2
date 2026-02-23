@@ -105,8 +105,6 @@ static void processFKeyFunction(const KEY_Code_t Key, const bool beep)
         gBeepToPlay = BEEP_500HZ_60MS_DOUBLE_BEEP_OPTIONAL;
         return;
     }
-    
-    gBeepToPlay = BEEP_1KHZ_60MS_OPTIONAL;
 
     switch (Key) {
         case KEY_0:
@@ -203,7 +201,7 @@ static void processFKeyFunction(const KEY_Code_t Key, const bool beep)
             #endif
             COMMON_SwitchVFOMode();
             if (beep)
-                gBeepToPlay = BEEP_500HZ_60MS_DOUBLE_BEEP_OPTIONAL;
+                gBeepToPlay = BEEP_1KHZ_60MS_OPTIONAL;
 
             break;
 
@@ -414,7 +412,7 @@ static void MAIN_Key_DIGITS(KEY_Code_t Key, bool bKeyPressed, bool bKeyHeld)
                 gWasFKeyPressed = false;
                 gUpdateStatus   = true;
 
-                processFKeyFunction(Key, false);
+                processFKeyFunction(Key, true);
             }
         }
         return;
@@ -591,7 +589,7 @@ static void MAIN_Key_DIGITS(KEY_Code_t Key, bool bKeyPressed, bool bKeyHeld)
     }
     #endif
 
-    processFKeyFunction(Key, true);
+    processFKeyFunction(Key, false);
 }
 
 static void MAIN_Key_EXIT(bool bKeyPressed, bool bKeyHeld)
@@ -709,6 +707,9 @@ static void MAIN_Key_MENU(bool bKeyPressed, bool bKeyHeld)
     }
 
     if (!bKeyPressed && !gDTMF_InputMode) { // menu key released
+        gKeyInputCountdown = 1;
+        channelMoveSwitch();
+
         const bool bFlag = !gInputBoxIndex;
         gInputBoxIndex   = 0;
 
@@ -857,7 +858,7 @@ static void MAIN_Key_UP_DOWN(bool bKeyPressed, bool bKeyHeld, int8_t Direction)
 
     if (bKeyHeld || !bKeyPressed) { // key held or released
         if (gInputBoxIndex > 0)
-            return; // leave if input box active
+            gInputBoxIndex = 0;
 
         if (!bKeyPressed) {
             if (!bKeyHeld || IS_FREQ_CHANNEL(Channel))
@@ -871,10 +872,6 @@ static void MAIN_Key_UP_DOWN(bool bKeyPressed, bool bKeyHeld, int8_t Direction)
         }
     }
     else { // short pressed
-        if (gInputBoxIndex > 0) {
-            gBeepToPlay = BEEP_500HZ_60MS_DOUBLE_BEEP_OPTIONAL;
-            return;
-        }
         gBeepToPlay = BEEP_1KHZ_60MS_OPTIONAL;
     }
 
