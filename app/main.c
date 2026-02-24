@@ -219,7 +219,7 @@ static void processFKeyFunction(const KEY_Code_t Key, const bool beep)
             break;
 
         case KEY_5:
-            if(beep) {
+            if(!beep) {
 #ifdef ENABLE_NOAA
                 if (!IS_NOAA_CHANNEL(gTxVfo->CHANNEL_SAVE)) {
                     gEeprom.ScreenChannel[Vfo] = gEeprom.NoaaChannel[gEeprom.TX_VFO];
