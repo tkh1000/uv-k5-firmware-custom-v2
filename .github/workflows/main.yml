@@ -331,7 +331,17 @@ jobs:
         PYEOF
 
     # -----------------------------------------------------------------------
-    # 8. Patch Makefile — register our new .c files in the build
+    # 8. Debug: show Makefile structure
+    # -----------------------------------------------------------------------
+    - name: Show Makefile (debug)
+      run: |
+        echo "=== Makefile (first 100 lines) ==="
+        head -100 firmware/Makefile || head -100 firmware/makefile || echo "Makefile not found"
+        echo "=== Lines containing .c or SRCS ==="
+        grep -n "\.c\|SRCS\|SRC\s*=\|OBJS" firmware/Makefile 2>/dev/null | head -40 || true
+
+    # -----------------------------------------------------------------------
+    # 9. Patch Makefile — register our new .c files in the build
     # -----------------------------------------------------------------------
     - name: Patch Makefile
       run: |
@@ -414,7 +424,7 @@ jobs:
         PYEOF
 
     # -----------------------------------------------------------------------
-    # 9. Pre-build sanity check
+    # 11. Pre-build sanity check
     # -----------------------------------------------------------------------
     - name: Verify patch symbols present
       run: |
