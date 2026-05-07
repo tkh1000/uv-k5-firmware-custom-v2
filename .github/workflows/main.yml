@@ -38,6 +38,7 @@ jobs:
     # -----------------------------------------------------------------------
     - name: Inject new source files
       run: |
+        mkdir -p firmware/Helper firmware/App
         cp our-files/Helper/fsk.h     firmware/Helper/fsk.h
         cp our-files/Helper/fsk.c     firmware/Helper/fsk.c
         cp our-files/Helper/crypto.h  firmware/Helper/crypto.h
