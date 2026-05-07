@@ -273,11 +273,11 @@ jobs:
         ]
 
         path = None
-        content = None
+        src = None
         for c in candidates:
             if os.path.exists(c):
                 with open(c) as f:
-                    content = f.read()
+                    src = f.read()
                 path = c
                 break
 
@@ -285,31 +285,37 @@ jobs:
             print("WARNING: menu.c not found — menu entries need manual addition.")
             sys.exit(0)
 
-        if "MESSENGER" in content:
+        if "MESSENGER" in src:
             print(f"menu.c already patched ({path}), skipping.")
             sys.exit(0)
 
-        menu_entries = (
-            '    { "MSG",       MENU_MESSENGER,  0, 0 },\n'
-            '    { "SCRAMBL",   MENU_SCRAMBLER,  0, 0 },\n'
-        )
+        # Find the last menu-table entry line: ends with }, or };
+        # Menu entries look like:  { "XYZ", MENU_SOMETHING, ... },
+        # We insert our two entries after the last such line.
+        lines = src.splitlines(keepends=True)
 
-        patched = re.sub(
-            r'(\{\s*NULL\s*,\s*0\s*[,}])',
-            menu_entries + r'\1',
-            content, count=1
+        # Find the last line that looks like a menu table row
+        last_menu_idx = None
+        menu_row = re.compile(r'\{\s*"[A-Z0-9_ ]{1,8}"\s*,')
+        for i, line in enumerate(lines):
+            if menu_row.search(line):
+                last_menu_idx = i
+
+        if last_menu_idx is None:
+            print("ERROR: could not locate menu table rows in menu.c", file=sys.stderr)
+            sys.exit(1)
+
+        # Insert our entries after the last menu row
+        insert = (
+            '    { "MSG",     MENU_MESSENGER, 0, 0 },\n'
+            '    { "SCRAMBL", MENU_SCRAMBLER, 0, 0 },\n'
         )
-        if patched == content:
-            patched = re.sub(
-                r'(\};\s*$)',
-                menu_entries + r'\1',
-                content, count=1, flags=re.MULTILINE
-            )
+        lines.insert(last_menu_idx + 1, insert)
 
         with open(path, 'w') as f:
-            f.write(patched)
+            f.writelines(lines)
 
-        print(f"Patched {path}")
+        print(f"Patched {path} after line {last_menu_idx + 1}")
         PYEOF
 
     # -----------------------------------------------------------------------
