@@ -231,7 +231,7 @@ void MSG_Render(void)
     memset(gFrameBuffer, 0, sizeof(gFrameBuffer));
 
     // Header — row 0
-    UI_PrintStringSmall("[ MESSENGER ]", 0, 127, 0);
+    UI_PrintStringSmallBold("[ MESSENGER ]", 0, 127, 0);
 
     // History — up to 3 entries, each on one text row (rows 1-3)
     for (int slot = 0; slot < 3; slot++) {
@@ -242,7 +242,7 @@ void MSG_Render(void)
 
         char line[22];
         snprintf(line, sizeof(line), "%c%.19s", e->sent ? '>' : '<', e->text);
-        UI_PrintStringSmall(line, 0, 127, (uint8_t)(slot + 1));
+        UI_PrintStringSmallBold(line, 0, 127, (uint8_t)(slot + 1));
     }
 
     // Separator — row 5
@@ -260,7 +260,7 @@ void MSG_Render(void)
         snprintf(compose_display, sizeof(compose_display),
                  ">%.19s%c", s_compose, cursor);
     }
-    UI_PrintStringSmall(compose_display, 0, 127, 6);
+    UI_PrintStringSmallBold(compose_display, 0, 127, 6);
 
     ST7565_BlitFullScreen();
 }
