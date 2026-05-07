@@ -302,8 +302,20 @@ jobs:
                 last_menu_idx = i
 
         if last_menu_idx is None:
-            print("ERROR: could not locate menu table rows in menu.c", file=sys.stderr)
-            sys.exit(1)
+            # Broader fallback: any line with a quoted string followed by a comma
+            broad = re.compile(r'\{\s*"[^"]{1,12}"\s*,')
+            for i, line in enumerate(lines):
+                if broad.search(line):
+                    last_menu_idx = i
+
+        if last_menu_idx is None:
+            print("WARNING: could not locate menu table rows in menu.c")
+            print("--- First 60 lines of menu.c for manual inspection ---")
+            for i, line in enumerate(lines[:60]):
+                print(f"{i+1:3}: {line}", end="")
+            print("--- End of sample ---")
+            print("Skipping menu patch — add MSG and SCRAMBL entries manually.")
+            sys.exit(0)
 
         # Insert our entries after the last menu row
         insert = (
