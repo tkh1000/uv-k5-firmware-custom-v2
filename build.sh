@@ -10,7 +10,7 @@ BUILD_DIR="$(mktemp -d /tmp/uv-k5-v12-build.XXXX)"
 FW_DIR="$BUILD_DIR/firmware"
 
 echo "==> Cloning F4HWN V1/V2 firmware..."
-git clone --depth=1 --branch main --single-branch https://github.com/armel/uv-k5-firmware-custom.git "$FW_DIR"
+git clone --depth=1 https://github.com/armel/uv-k5-firmware-custom.git "$FW_DIR"
 
 echo "==> Injecting source files..."
 cp "$SCRIPT_DIR/Helper/fsk.h"      "$FW_DIR/Helper/fsk.h"
