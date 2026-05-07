@@ -1,4 +1,4 @@
-name: Build Firmware – Messenger + Scrambler
+name: Build Firmware
 
 on:
   push:
@@ -13,18 +13,12 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-    # -----------------------------------------------------------------------
-    # 1. Checkout our own repo (contains Helper/, App/, scripts/)
-    # -----------------------------------------------------------------------
     - name: Checkout our repo
       uses: actions/checkout@v4
       with:
         path: our-files
         fetch-depth: 1
 
-    # -----------------------------------------------------------------------
-    # 2. Checkout the F4HWN V1/V2 firmware repo
-    # -----------------------------------------------------------------------
     - name: Checkout firmware
       uses: actions/checkout@v4
       with:
@@ -33,9 +27,6 @@ jobs:
         path: firmware
         fetch-depth: 1
 
-    # -----------------------------------------------------------------------
-    # 3. Copy our new source files into the firmware tree
-    # -----------------------------------------------------------------------
     - name: Inject new source files
       run: |
         mkdir -p firmware/Helper firmware/App
@@ -49,414 +40,40 @@ jobs:
         cp our-files/App/messenger.c  firmware/App/messenger.c
         cp our-files/App/scrambler.h  firmware/App/scrambler.h
 
-    # -----------------------------------------------------------------------
-    # 4. Patch settings.h — add MESSENGER_KEY[32] + MESSENGER_CALLSIGN[11]
-    #    + SCRAMBLER_ENABLED to the EEPROM_Config_t struct
-    # -----------------------------------------------------------------------
     - name: Patch settings.h
-      run: |
-        python3 - <<'PYEOF'
-        import re, sys
+      run: python3 our-files/scripts/patch_settings.py firmware
 
-        candidates = [
-            "firmware/settings.h",
-            "firmware/Settings/settings.h",
-            "firmware/include/settings.h",
-        ]
-
-        path = None
-        for c in candidates:
-            try:
-                with open(c) as f:
-                    content = f.read()
-                path = c
-                break
-            except FileNotFoundError:
-                continue
-
-        if path is None:
-            print("ERROR: settings.h not found", file=sys.stderr)
-            sys.exit(1)
-
-        if "MESSENGER_KEY" in content:
-            print(f"settings.h already patched ({path}), skipping.")
-            sys.exit(0)
-
-        patch_block = (
-            "\n"
-            "    // --- Messenger / Scrambler (added by CI patch) ---\n"
-            "    uint8_t  MESSENGER_KEY[32];         // ChaCha20-256 shared key\n"
-            "    char     MESSENGER_CALLSIGN[11];    // local callsign (null-terminated)\n"
-            "    uint8_t  SCRAMBLER_ENABLED;         // 0=off, 1=on\n"
-        )
-
-        patched = re.sub(
-            r'(\}\s*EEPROM_Config_t\s*;)',
-            patch_block + r'\1',
-            content,
-            count=1
-        )
-
-        if patched == content:
-            patched = re.sub(
-                r'(\n\}\s*;)',
-                patch_block + r'\1',
-                content,
-                count=1
-            )
-
-        if patched == content:
-            print("ERROR: could not locate struct closing brace in settings.h", file=sys.stderr)
-            sys.exit(1)
-
-        with open(path, 'w') as f:
-            f.write(patched)
-
-        print(f"Patched {path}")
-        PYEOF
-
-    # -----------------------------------------------------------------------
-    # 5. Patch app.c — wire MSG_Init, MSG_TimeSlice10ms, MSG_HandleKey,
-    #    PTT press/release for scrambler TX, squelch open/close for RX
-    # -----------------------------------------------------------------------
     - name: Patch app.c
-      run: |
-        python3 - <<'PYEOF'
-        import re, sys
+      run: python3 our-files/scripts/patch_app.py firmware
 
-        candidates = [
-            "firmware/app/app.c",
-            "firmware/App/app.c",
-            "firmware/src/app.c",
-        ]
-
-        path = None
-        content = None
-        for c in candidates:
-            try:
-                with open(c) as f:
-                    content = f.read()
-                path = c
-                break
-            except FileNotFoundError:
-                continue
-
-        if path is None:
-            print("ERROR: app.c not found", file=sys.stderr)
-            sys.exit(1)
-
-        if "MSG_Init" in content:
-            print(f"app.c already patched ({path}), skipping.")
-            sys.exit(0)
-
-        includes = (
-            '#include "App/messenger.h"\n'
-            '#include "App/scrambler.h"\n'
-        )
-        content = re.sub(
-            r'(#include\s+"[^"]+"\s*\n)(?!#include)',
-            r'\1' + includes,
-            content,
-            count=1
-        )
-
-        content = re.sub(
-            r'(void\s+APP_Init\s*\(.*?\)\s*\{)',
-            r'\1\n    MSG_Init();',
-            content, count=1, flags=re.DOTALL
-        )
-
-        content = re.sub(
-            r'(void\s+APP_TimeSlice10ms\s*\(.*?\)\s*\{)',
-            r'\1\n    if (MSG_IsActive()) MSG_TimeSlice10ms();',
-            content, count=1, flags=re.DOTALL
-        )
-
-        content = re.sub(
-            r'(void\s+APP_ProcessKey\s*\(.*?\)\s*\{)',
-            r'\1\n    if (MSG_IsActive()) { MSG_HandleKey(Key, bKeyPressed, bKeyHeld); return; }',
-            content, count=1, flags=re.DOTALL
-        )
-
-        content = re.sub(
-            r'(RADIO_PrepareTX\s*\(\s*\)\s*;)',
-            r'SCRAMBLER_Enable();\n    \1',
-            content, count=1
-        )
-
-        content = re.sub(
-            r'(RADIO_ReleaseTX\s*\(\s*\)\s*;|APP_EndTransmission\s*\(\s*\)\s*;)',
-            r'\1\n    SCRAMBLER_Disable();',
-            content, count=1
-        )
-
-        content = re.sub(
-            r'(AUDIO_AudioBegin\s*\(\s*\)\s*;)',
-            r'\1\n    SCRAMBLER_Enable();',
-            content, count=1
-        )
-
-        content = re.sub(
-            r'(AUDIO_AudioEnd\s*\(\s*\)\s*;)',
-            r'\1\n    SCRAMBLER_Disable();',
-            content, count=1
-        )
-
-        with open(path, 'w') as f:
-            f.write(content)
-
-        print(f"Patched {path}")
-        PYEOF
-
-    # -----------------------------------------------------------------------
-    # 6. Patch audio ADC read path — inject SCRAMBLER_ProcessSample()
-    # -----------------------------------------------------------------------
     - name: Patch audio ADC path
-      run: |
-        python3 - <<'PYEOF'
-        import re, sys, os
+      run: python3 our-files/scripts/patch_audio_adc.py firmware
 
-        candidates = [
-            "firmware/App/audio.c",
-            "firmware/app/audio.c",
-            "firmware/App/app.c",
-            "firmware/app/app.c",
-            "firmware/driver/bk4819.c",
-        ]
-
-        adc_patterns = [
-            r'(ADC_GetValue\s*\([^)]*\))',
-            r'(BK4819_GetADC\s*\([^)]*\))',
-            r'(gADC_Result\s*\[\s*\d+\s*\])',
-            r'(\w+\s*=\s*\*\s*\(volatile uint16_t\s*\*\)\s*ADC_\w+)',
-        ]
-
-        patched_any = False
-        for path in candidates:
-            if not os.path.exists(path):
-                continue
-            with open(path) as f:
-                content = f.read()
-
-            if "SCRAMBLER_ProcessSample" in content:
-                print(f"{path}: already patched, skipping.")
-                patched_any = True
-                continue
-
-            for pat in adc_patterns:
-                new_content = re.sub(pat, r'SCRAMBLER_ProcessSample(\1)', content, count=1)
-                if new_content != content:
-                    if '#include "App/scrambler.h"' not in new_content:
-                        new_content = '#include "App/scrambler.h"\n' + new_content
-                    with open(path, 'w') as f:
-                        f.write(new_content)
-                    print(f"Patched ADC read in {path}")
-                    patched_any = True
-                    break
-
-        if not patched_any:
-            print("WARNING: could not locate ADC read pattern — scrambler RX path may need manual hookup.")
-        PYEOF
-
-    # -----------------------------------------------------------------------
-    # 7. Patch menu.c — add MESSENGER and SCRAMBLER menu entries
-    # -----------------------------------------------------------------------
     - name: Patch menu.c
-      run: |
-        python3 - <<'PYEOF'
-        import re, sys, os
+      run: python3 our-files/scripts/patch_menu.py firmware
 
-        candidates = [
-            "firmware/app/menu.c",
-            "firmware/App/menu.c",
-            "firmware/app/MENU.c",
-        ]
-
-        path = None
-        src = None
-        for c in candidates:
-            if os.path.exists(c):
-                with open(c) as f:
-                    src = f.read()
-                path = c
-                break
-
-        if path is None:
-            print("WARNING: menu.c not found — menu entries need manual addition.")
-            sys.exit(0)
-
-        if "MESSENGER" in src:
-            print(f"menu.c already patched ({path}), skipping.")
-            sys.exit(0)
-
-        # Find the last menu-table entry line: ends with }, or };
-        # Menu entries look like:  { "XYZ", MENU_SOMETHING, ... },
-        # We insert our two entries after the last such line.
-        lines = src.splitlines(keepends=True)
-
-        # Find the last line that looks like a menu table row
-        last_menu_idx = None
-        menu_row = re.compile(r'\{\s*"[A-Z0-9_ ]{1,8}"\s*,')
-        for i, line in enumerate(lines):
-            if menu_row.search(line):
-                last_menu_idx = i
-
-        if last_menu_idx is None:
-            # Broader fallback: any line with a quoted string followed by a comma
-            broad = re.compile(r'\{\s*"[^"]{1,12}"\s*,')
-            for i, line in enumerate(lines):
-                if broad.search(line):
-                    last_menu_idx = i
-
-        if last_menu_idx is None:
-            print("WARNING: could not locate menu table rows in menu.c")
-            print("--- First 60 lines of menu.c for manual inspection ---")
-            for i, line in enumerate(lines[:60]):
-                print(f"{i+1:3}: {line}", end="")
-            print("--- End of sample ---")
-            print("Skipping menu patch — add MSG and SCRAMBL entries manually.")
-            sys.exit(0)
-
-        # Insert our entries after the last menu row
-        insert = (
-            '    { "MSG",     MENU_MESSENGER, 0, 0 },\n'
-            '    { "SCRAMBL", MENU_SCRAMBLER, 0, 0 },\n'
-        )
-        lines.insert(last_menu_idx + 1, insert)
-
-        with open(path, 'w') as f:
-            f.writelines(lines)
-
-        print(f"Patched {path} after line {last_menu_idx + 1}")
-        PYEOF
-
-    # -----------------------------------------------------------------------
-    # 8. Debug: show Makefile structure
-    # -----------------------------------------------------------------------
-    - name: Show Makefile (debug)
-      run: |
-        echo "=== Makefile (first 100 lines) ==="
-        head -100 firmware/Makefile || head -100 firmware/makefile || echo "Makefile not found"
-        echo "=== Lines containing .c or SRCS ==="
-        grep -n "\.c\|SRCS\|SRC\s*=\|OBJS" firmware/Makefile 2>/dev/null | head -40 || true
-
-    # -----------------------------------------------------------------------
-    # 9. Patch Makefile — register our new .c files in the build
-    # -----------------------------------------------------------------------
     - name: Patch Makefile
-      run: |
-        python3 - <<'PYEOF'
-        import re, sys, os
+      run: python3 our-files/scripts/patch_makefile.py firmware
 
-        candidates = [
-            "firmware/Makefile",
-            "firmware/makefile",
-        ]
-
-        path = None
-        src = None
-        for c in candidates:
-            if os.path.exists(c):
-                with open(c) as f:
-                    src = f.read()
-                path = c
-                break
-
-        if path is None:
-            print("ERROR: Makefile not found", file=sys.stderr)
-            sys.exit(1)
-
-        if "messenger.c" in src:
-            print(f"Makefile already patched ({path}), skipping.")
-            sys.exit(0)
-
-        our_files = [
-            "Helper/fsk.c",
-            "Helper/crypto.c",
-            "App/bk4819_fsk.c",
-            "App/messenger.c",
-        ]
-
-        # Strategy 1: find a line that assigns/appends .c files to SRCS or SRC
-        # e.g.  SRCS = app/app.c app/menu.c ...
-        # or    SRC  = $(wildcard app/*.c) ...
-        lines = src.splitlines(keepends=True)
-
-        # Find the last line that looks like a source-file assignment
-        src_line_idx = None
-        src_assign = re.compile(r'^(SRCS?|OBJS?|C_SRCS?)\s*[+:?]?=', re.IGNORECASE)
-        for i, line in enumerate(lines):
-            if src_assign.match(line.strip()) or ('app/' in line and '.c' in line):
-                src_line_idx = i
-
-        if src_line_idx is not None:
-            # Append our files as additional += lines after that block
-            insert = "\n# --- Messenger + Scrambler sources ---\n"
-            for f in our_files:
-                insert += f"SRCS += {f}\n"
-            lines.insert(src_line_idx + 1, insert)
-            with open(path, 'w') as f:
-                f.writelines(lines)
-            print(f"Patched Makefile with SRCS += after line {src_line_idx + 1}")
-            sys.exit(0)
-
-        # Strategy 2: look for the link rule / object list and inject .o entries
-        obj_line_idx = None
-        for i, line in enumerate(lines):
-            if re.search(r'app/app\.o|app/menu\.o', line):
-                obj_line_idx = i
-
-        if obj_line_idx is not None:
-            obj_insert = "".join(
-                f"  {f.replace('.c', '.o')} \\\n" for f in our_files
-            )
-            lines.insert(obj_line_idx + 1, obj_insert)
-            with open(path, 'w') as f:
-                f.writelines(lines)
-            print(f"Patched Makefile with .o entries after line {obj_line_idx + 1}")
-            sys.exit(0)
-
-        # Neither strategy worked — print first 80 lines for debugging
-        print("WARNING: could not auto-patch Makefile. First 80 lines:")
-        for i, line in enumerate(lines[:80]):
-            print(f"{i+1:3}: {line}", end="")
-        sys.exit(1)
-        PYEOF
-
-    # -----------------------------------------------------------------------
-    # 11. Pre-build sanity check
-    # -----------------------------------------------------------------------
     - name: Verify patch symbols present
       run: |
-        echo "Checking for required symbols..."
         MISSING=0
-
         for sym in MSG_Init MSG_TimeSlice10ms MSG_HandleKey SCRAMBLER_ProcessSample; do
-          if ! grep -rq "$sym" firmware/; then
+          if grep -rq "$sym" firmware/; then
+            echo "OK: $sym"
+          else
             echo "MISSING: $sym"
             MISSING=1
-          else
-            echo "OK: $sym"
           fi
         done
+        if [ $MISSING -ne 0 ]; then exit 1; fi
 
-        if [ $MISSING -ne 0 ]; then
-          echo "One or more required symbols are absent. Aborting build."
-          exit 1
-        fi
-
-    # -----------------------------------------------------------------------
-    # 9. Run the Docker-based build
-    # -----------------------------------------------------------------------
     - name: Compile firmware
       working-directory: firmware
       run: |
         chmod +x compile-with-docker.sh
         ./compile-with-docker.sh broadcast
 
-    # -----------------------------------------------------------------------
-    # 10. Artifact upload
-    # -----------------------------------------------------------------------
     - name: Upload firmware artifact
       uses: actions/upload-artifact@v4
       with:
@@ -464,19 +81,11 @@ jobs:
         path: firmware/compiled-firmware/f4hwn.packed.bin
         retention-days: 90
 
-    # -----------------------------------------------------------------------
-    # 11. GitHub Release attachment (on version tags)
-    # -----------------------------------------------------------------------
     - name: Create GitHub Release
       if: startsWith(github.ref, 'refs/tags/v')
       uses: softprops/action-gh-release@v2
       with:
         files: firmware/compiled-firmware/f4hwn.packed.bin
         body: |
-          ## UV-K5 V1/V2 Firmware – Messenger + Scrambler
-
-          Built from F4HWN Fusion base with:
-          - FSK SMS Messenger (ChaCha20-256 encrypted, CRC-16/CCITT-FALSE framed)
-          - Frequency-inversion voice scrambler (10-bit ADC, DP32G030)
-
-          **Flash with the Quansheng UV-K5 DFU tool. Backup EEPROM first.**
+          UV-K5 V1/V2 Firmware with FSK Messenger and frequency-inversion scrambler.
+          Flash with Quansheng DFU tool. Back up EEPROM first.
