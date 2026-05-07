@@ -55,6 +55,9 @@ jobs:
     - name: Patch Makefile
       run: python3 our-files/scripts/patch_makefile.py firmware
 
+    - name: Patch action system
+      run: python3 our-files/scripts/patch_action.py firmware
+
     - name: Verify patch symbols present
       run: |
         MISSING=0
