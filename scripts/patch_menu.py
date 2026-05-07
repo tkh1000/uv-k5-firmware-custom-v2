@@ -3,10 +3,12 @@ import re, sys, os
 
 fw = sys.argv[1] if len(sys.argv) > 1 else "firmware"
 
+# Check both app/menu.c AND ui/menu.c — the table is often in ui/menu.c
 candidates = [
+    f"{fw}/ui/menu.c",
     f"{fw}/app/menu.c",
     f"{fw}/App/menu.c",
-    f"{fw}/app/MENU.c",
+    f"{fw}/ui/MENU.c",
 ]
 
 path = None
@@ -19,7 +21,7 @@ for c in candidates:
         break
 
 if path is None:
-    print("WARNING: menu.c not found — add MSG/SCRAMBL entries manually.")
+    print("WARNING: no menu.c found in app/ or ui/ — skipping menu patch.")
     sys.exit(0)
 
 if "MESSENGER" in src:
@@ -28,19 +30,24 @@ if "MESSENGER" in src:
 
 lines = src.splitlines(keepends=True)
 
-# Find last line matching a menu table row pattern
+# Find last line matching a menu table row (various formats)
 last_idx = None
-for pat in [r'\{\s*"[A-Z0-9_ ]{1,8}"\s*,', r'\{\s*"[^"]{1,12}"\s*,']:
-    compiled = re.compile(pat)
+patterns = [
+    re.compile(r'\{\s*"[A-Z0-9_ ]{1,10}"\s*,'),   # { "SQL", ...
+    re.compile(r'"\w{1,10}"\s*,\s*\w+\s*,'),        # "SQL", MENU_SQL,
+    re.compile(r'MENU_\w+'),                          # any MENU_ constant
+]
+for pat in patterns:
     for i, line in enumerate(lines):
-        if compiled.search(line):
+        if pat.search(line):
             last_idx = i
 
 if last_idx is None:
-    print("WARNING: could not locate menu table rows — first 60 lines:")
-    for i, line in enumerate(lines[:60]):
+    print(f"WARNING: could not locate menu table in {path}")
+    print("First 80 lines:")
+    for i, line in enumerate(lines[:80]):
         print(f"{i+1:3}: {line}", end="")
-    print("Add MSG and SCRAMBL entries to menu.c manually.")
+    print("Skipping — add MSG/SCRAMBL entries manually.")
     sys.exit(0)
 
 insert = '    { "MSG",     MENU_MESSENGER, 0, 0 },\n    { "SCRAMBL", MENU_SCRAMBLER, 0, 0 },\n'
