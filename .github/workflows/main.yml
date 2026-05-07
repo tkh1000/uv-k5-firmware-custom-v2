@@ -74,11 +74,18 @@ jobs:
         chmod +x compile-with-docker.sh
         ./compile-with-docker.sh broadcast
 
+    - name: Find build output
+      run: |
+        echo "=== compiled-firmware contents ==="
+        ls -lh firmware/compiled-firmware/ 2>/dev/null || echo "(directory missing)"
+        echo "=== all .bin files in firmware/ ==="
+        find firmware/ -name "*.bin" | sort
+
     - name: Upload firmware artifact
       uses: actions/upload-artifact@v4
       with:
         name: f4hwn-messenger-scrambler
-        path: firmware/compiled-firmware/f4hwn.packed.bin
+        path: firmware/compiled-firmware/*.bin
         retention-days: 90
 
     - name: Create GitHub Release
