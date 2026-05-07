@@ -341,7 +341,7 @@ jobs:
       working-directory: firmware
       run: |
         chmod +x compile-with-docker.sh
-        ./compile-with-docker.sh
+        ./compile-with-docker.sh broadcast
 
     # -----------------------------------------------------------------------
     # 10. Artifact upload
