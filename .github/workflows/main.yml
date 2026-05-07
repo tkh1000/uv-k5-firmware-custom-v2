@@ -14,7 +14,16 @@ jobs:
 
     steps:
     # -----------------------------------------------------------------------
-    # 1. Checkout the F4HWN V1/V2 firmware repo
+    # 1. Checkout our own repo (contains Helper/, App/, scripts/)
+    # -----------------------------------------------------------------------
+    - name: Checkout our repo
+      uses: actions/checkout@v4
+      with:
+        path: our-files
+        fetch-depth: 1
+
+    # -----------------------------------------------------------------------
+    # 2. Checkout the F4HWN V1/V2 firmware repo
     # -----------------------------------------------------------------------
     - name: Checkout firmware
       uses: actions/checkout@v4
@@ -25,22 +34,22 @@ jobs:
         fetch-depth: 1
 
     # -----------------------------------------------------------------------
-    # 2. Copy our new source files into the firmware tree
+    # 3. Copy our new source files into the firmware tree
     # -----------------------------------------------------------------------
     - name: Inject new source files
       run: |
-        cp Helper/fsk.h     firmware/Helper/fsk.h
-        cp Helper/fsk.c     firmware/Helper/fsk.c
-        cp Helper/crypto.h  firmware/Helper/crypto.h
-        cp Helper/crypto.c  firmware/Helper/crypto.c
-        cp App/bk4819_fsk.h firmware/App/bk4819_fsk.h
-        cp App/bk4819_fsk.c firmware/App/bk4819_fsk.c
-        cp App/messenger.h  firmware/App/messenger.h
-        cp App/messenger.c  firmware/App/messenger.c
-        cp App/scrambler.h  firmware/App/scrambler.h
+        cp our-files/Helper/fsk.h     firmware/Helper/fsk.h
+        cp our-files/Helper/fsk.c     firmware/Helper/fsk.c
+        cp our-files/Helper/crypto.h  firmware/Helper/crypto.h
+        cp our-files/Helper/crypto.c  firmware/Helper/crypto.c
+        cp our-files/App/bk4819_fsk.h firmware/App/bk4819_fsk.h
+        cp our-files/App/bk4819_fsk.c firmware/App/bk4819_fsk.c
+        cp our-files/App/messenger.h  firmware/App/messenger.h
+        cp our-files/App/messenger.c  firmware/App/messenger.c
+        cp our-files/App/scrambler.h  firmware/App/scrambler.h
 
     # -----------------------------------------------------------------------
-    # 3. Patch settings.h — add MESSENGER_KEY[32] + MESSENGER_CALLSIGN[11]
+    # 4. Patch settings.h — add MESSENGER_KEY[32] + MESSENGER_CALLSIGN[11]
     #    + SCRAMBLER_ENABLED to the EEPROM_Config_t struct
     # -----------------------------------------------------------------------
     - name: Patch settings.h
@@ -68,13 +77,10 @@ jobs:
             print("ERROR: settings.h not found", file=sys.stderr)
             sys.exit(1)
 
-        # Guard: skip if already patched
         if "MESSENGER_KEY" in content:
             print(f"settings.h already patched ({path}), skipping.")
             sys.exit(0)
 
-        # Find closing brace of EEPROM_Config_t struct
-        # Insert before the last '}' that closes the struct
         patch_block = (
             "\n"
             "    // --- Messenger / Scrambler (added by CI patch) ---\n"
@@ -83,7 +89,6 @@ jobs:
             "    uint8_t  SCRAMBLER_ENABLED;         // 0=off, 1=on\n"
         )
 
-        # Strategy: insert before the last '} EEPROM_Config_t;' pattern
         patched = re.sub(
             r'(\}\s*EEPROM_Config_t\s*;)',
             patch_block + r'\1',
@@ -92,7 +97,6 @@ jobs:
         )
 
         if patched == content:
-            # Fallback: insert before closing brace of a typedef struct block
             patched = re.sub(
                 r'(\n\}\s*;)',
                 patch_block + r'\1',
@@ -111,9 +115,8 @@ jobs:
         PYEOF
 
     # -----------------------------------------------------------------------
-    # 4. Patch app.c — wire MSG_Init, MSG_TimeSlice10ms, MSG_HandleKey,
-    #    PTT press/release for scrambler TX enable/disable,
-    #    and squelch open/close for scrambler RX enable/disable
+    # 5. Patch app.c — wire MSG_Init, MSG_TimeSlice10ms, MSG_HandleKey,
+    #    PTT press/release for scrambler TX, squelch open/close for RX
     # -----------------------------------------------------------------------
     - name: Patch app.c
       run: |
@@ -145,7 +148,6 @@ jobs:
             print(f"app.c already patched ({path}), skipping.")
             sys.exit(0)
 
-        # ---- 4a. Add includes near top (after last existing #include) ----
         includes = (
             '#include "App/messenger.h"\n'
             '#include "App/scrambler.h"\n'
@@ -157,80 +159,46 @@ jobs:
             count=1
         )
 
-        # ---- 4b. Init hook — call MSG_Init() inside APP_Init() or equivalent ----
         content = re.sub(
             r'(void\s+APP_Init\s*\(.*?\)\s*\{)',
             r'\1\n    MSG_Init();',
-            content,
-            count=1,
-            flags=re.DOTALL
+            content, count=1, flags=re.DOTALL
         )
 
-        # ---- 4c. Timeslice hook — call MSG_TimeSlice10ms() in 10ms tick ----
-        # Look for an existing 10ms timeslice function
         content = re.sub(
             r'(void\s+APP_TimeSlice10ms\s*\(.*?\)\s*\{)',
             r'\1\n    if (MSG_IsActive()) MSG_TimeSlice10ms();',
-            content,
-            count=1,
-            flags=re.DOTALL
+            content, count=1, flags=re.DOTALL
         )
 
-        # ---- 4d. Key handler hook ----
-        # Intercept key events when messenger is active
         content = re.sub(
             r'(void\s+APP_ProcessKey\s*\(.*?\)\s*\{)',
             r'\1\n    if (MSG_IsActive()) { MSG_HandleKey(Key, bKeyPressed, bKeyHeld); return; }',
-            content,
-            count=1,
-            flags=re.DOTALL
+            content, count=1, flags=re.DOTALL
         )
 
-        # ---- 4e. PTT press → SCRAMBLER_Enable(), PTT release → SCRAMBLER_Disable() ----
-        # Find PTT press handler pattern (varies by firmware version; probe both)
-        ptt_press_pattern = re.compile(
-            r'(case\s+KEY_PTT\s*:.*?)(//|bk4819|BK4819|RADIO_PrepareTX)',
-            re.DOTALL
+        content = re.sub(
+            r'(RADIO_PrepareTX\s*\(\s*\)\s*;)',
+            r'SCRAMBLER_Enable();\n    \1',
+            content, count=1
         )
-        if ptt_press_pattern.search(content):
-            content = ptt_press_pattern.sub(
-                r'\1SCRAMBLER_Enable();\n    \2',
-                content,
-                count=1
-            )
-        else:
-            # Fallback: look for the PTX/TX start call directly
-            content = re.sub(
-                r'(RADIO_PrepareTX\s*\(\s*\)\s*;)',
-                r'SCRAMBLER_Enable();\n    \1',
-                content,
-                count=1
-            )
 
-        # PTT release / TX end
         content = re.sub(
             r'(RADIO_ReleaseTX\s*\(\s*\)\s*;|APP_EndTransmission\s*\(\s*\)\s*;)',
             r'\1\n    SCRAMBLER_Disable();',
-            content,
-            count=1
+            content, count=1
         )
 
-        # ---- 4f. Squelch open → SCRAMBLER_Enable() for RX de-scramble ----
         content = re.sub(
-            r'(AUDIO_AudioBegin\s*\(\s*\)\s*;|squelch.*?open.*?;)',
+            r'(AUDIO_AudioBegin\s*\(\s*\)\s*;)',
             r'\1\n    SCRAMBLER_Enable();',
-            content,
-            count=1,
-            flags=re.IGNORECASE
+            content, count=1
         )
 
-        # Squelch close → SCRAMBLER_Disable()
         content = re.sub(
-            r'(AUDIO_AudioEnd\s*\(\s*\)\s*;|squelch.*?close.*?;)',
+            r'(AUDIO_AudioEnd\s*\(\s*\)\s*;)',
             r'\1\n    SCRAMBLER_Disable();',
-            content,
-            count=1,
-            flags=re.IGNORECASE
+            content, count=1
         )
 
         with open(path, 'w') as f:
@@ -240,14 +208,13 @@ jobs:
         PYEOF
 
     # -----------------------------------------------------------------------
-    # 5. Patch audio ADC read path — inject SCRAMBLER_ProcessSample()
+    # 6. Patch audio ADC read path — inject SCRAMBLER_ProcessSample()
     # -----------------------------------------------------------------------
     - name: Patch audio ADC path
       run: |
         python3 - <<'PYEOF'
         import re, sys, os
 
-        # Probe candidate files for ADC read patterns
         candidates = [
             "firmware/App/audio.c",
             "firmware/app/audio.c",
@@ -276,14 +243,8 @@ jobs:
                 continue
 
             for pat in adc_patterns:
-                new_content = re.sub(
-                    pat,
-                    r'SCRAMBLER_ProcessSample(\1)',
-                    content,
-                    count=1
-                )
+                new_content = re.sub(pat, r'SCRAMBLER_ProcessSample(\1)', content, count=1)
                 if new_content != content:
-                    # Add include if not present
                     if '#include "App/scrambler.h"' not in new_content:
                         new_content = '#include "App/scrambler.h"\n' + new_content
                     with open(path, 'w') as f:
@@ -297,7 +258,7 @@ jobs:
         PYEOF
 
     # -----------------------------------------------------------------------
-    # 6. Patch menu.c — add MESSENGER and SCRAMBLER menu entries
+    # 7. Patch menu.c — add MESSENGER and SCRAMBLER menu entries
     # -----------------------------------------------------------------------
     - name: Patch menu.c
       run: |
@@ -327,27 +288,21 @@ jobs:
             print(f"menu.c already patched ({path}), skipping.")
             sys.exit(0)
 
-        # Find a natural insertion point — last menu item before closing brace/sentinel
         menu_entries = (
             '    { "MSG",       MENU_MESSENGER,  0, 0 },\n'
             '    { "SCRAMBL",   MENU_SCRAMBLER,  0, 0 },\n'
         )
 
-        # Try to insert before a typical sentinel/end marker
         patched = re.sub(
             r'(\{\s*NULL\s*,\s*0\s*[,}])',
             menu_entries + r'\1',
-            content,
-            count=1
+            content, count=1
         )
         if patched == content:
-            # Fallback: append before closing brace of the menu table
             patched = re.sub(
                 r'(\};\s*$)',
                 menu_entries + r'\1',
-                content,
-                count=1,
-                flags=re.MULTILINE
+                content, count=1, flags=re.MULTILINE
             )
 
         with open(path, 'w') as f:
@@ -357,7 +312,7 @@ jobs:
         PYEOF
 
     # -----------------------------------------------------------------------
-    # 7. Pre-build sanity check
+    # 8. Pre-build sanity check
     # -----------------------------------------------------------------------
     - name: Verify patch symbols present
       run: |
@@ -379,7 +334,7 @@ jobs:
         fi
 
     # -----------------------------------------------------------------------
-    # 8. Run the Docker-based build (unchanged from original workflow)
+    # 9. Run the Docker-based build
     # -----------------------------------------------------------------------
     - name: Compile firmware
       working-directory: firmware
@@ -388,7 +343,7 @@ jobs:
         ./compile-with-docker.sh
 
     # -----------------------------------------------------------------------
-    # 9. Artifact upload
+    # 10. Artifact upload
     # -----------------------------------------------------------------------
     - name: Upload firmware artifact
       uses: actions/upload-artifact@v4
@@ -398,7 +353,7 @@ jobs:
         retention-days: 90
 
     # -----------------------------------------------------------------------
-    # 10. GitHub Release attachment (on version tags)
+    # 11. GitHub Release attachment (on version tags)
     # -----------------------------------------------------------------------
     - name: Create GitHub Release
       if: startsWith(github.ref, 'refs/tags/v')
